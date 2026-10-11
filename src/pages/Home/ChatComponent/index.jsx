@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import axios from "axios";
 import {
   ContainerChat,
   ChatHeader,
@@ -26,51 +27,110 @@ export default function ChatComponent() {
   const handleSendMessage = (e) => {
     e?.preventDefault();
     if (!message || aiLoading) return;
-    const newMessage = { isYou: true, message }; // isYou = flag buat posisi kiri kanan
+    const userMessage = message;
+    const newMessage = { isYou: true, message: userMessage };
     setMessages((prevMessages) => [...prevMessages, newMessage]);
     setMessage("");
 
     // scroll to bottom
     setTimeout(() => {
-      messageSectionRef.current.scrollTop =
-        messageSectionRef.current.scrollHeight;
+      if (messageSectionRef.current) {
+        messageSectionRef.current.scrollTop =
+          messageSectionRef.current.scrollHeight;
+      }
     }, 100);
 
-    handleAISendMessage();
+    handleAISendMessage(userMessage);
   };
 
-  // ini buat demo aja ya.
-  const handleAISendMessage = async () => {
+  const handleAISendMessage = async (userText) => {
     setAiLoading(true);
     // kasih baloon loading
     const loadingMessage = {
       message: ". . .",
-      id: "loading", // Add an id for tracking (yang nantinya dihapus)
+      id: "loading",
     };
     setMessages((prevMessages) => [...prevMessages, loadingMessage]);
 
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    // hapus ballon loading
-    setMessages((prevMessages) =>
-      prevMessages.filter((msg) => msg.id !== "loading")
-    );
-
-    // kasih chat
-    const newMessage = {
-      message:
-        "Nostrud reprehenderit proident mollit deserunt dolore tempor ullamco. Ad exercitation laboris eiusmod ullamco ea. Qui ad sunt consectetur in nulla eiusmod minim excepteur.",
-    };
-    setMessages((prevMessages) => [...prevMessages, newMessage]);
-    setIsTalking(true);
-    // scroll to bottom
     setTimeout(() => {
-      messageSectionRef.current.scrollTop =
-        messageSectionRef.current.scrollHeight;
+      if (messageSectionRef.current) {
+        messageSectionRef.current.scrollTop =
+          messageSectionRef.current.scrollHeight;
+      }
     }, 100);
 
-    await new Promise((resolve) => setTimeout(resolve, 5500));
-    setAiLoading(false);
-    setIsTalking(false);
+    try {
+      const promptToSend =
+        userText ||
+        "Halo! Perkenalkan dirimu secara singkat dalam 1-2 kalimat ramah sebagai asisten AI avatar.";
+
+      let res;
+      try {
+        res = await axios.post("/.netlify/functions/chat-gemini", {
+          messages: promptToSend,
+        });
+      } catch (funcErr) {
+        // Fallback untuk local dev jika fungsi Netlify tidak berjalan (404)
+        const localKey =
+          (typeof process !== "undefined" && process.env?.GEMINI_API_KEY) ||
+          import.meta.env?.VITE_GEMINI_API_KEY ||
+          import.meta.env?.GEMINI_API_KEY;
+
+        if (localKey && (funcErr.response?.status === 404 || !funcErr.response)) {
+          res = await axios.post(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${localKey}`,
+            {
+              contents: [
+                {
+                  parts: [{ text: promptToSend }],
+                },
+              ],
+            },
+            {
+              headers: {
+                "Content-Type": "application/json",
+              },
+            }
+          );
+        } else {
+          throw funcErr;
+        }
+      }
+
+      const reply =
+        res.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+        "Maaf, saya tidak menerima respons.";
+
+      setMessages((prevMessages) => [
+        ...prevMessages.filter((msg) => msg.id !== "loading"),
+        { message: reply },
+      ]);
+
+      setIsTalking(true);
+
+      setTimeout(() => {
+        if (messageSectionRef.current) {
+          messageSectionRef.current.scrollTop =
+            messageSectionRef.current.scrollHeight;
+        }
+      }, 100);
+
+      // Hitung durasi avatar bicara berdasarkan panjang respon teks
+      const talkDuration = Math.min(Math.max(reply.length * 60, 2500), 8000);
+      await new Promise((resolve) => setTimeout(resolve, talkDuration));
+    } catch (err) {
+      console.error("Gemini API Error:", err);
+      const errorMessage =
+        err.response?.data?.error?.message ||
+        "Maaf, terjadi kesalahan saat menghubungi AI. Silakan coba lagi.";
+      setMessages((prevMessages) => [
+        ...prevMessages.filter((msg) => msg.id !== "loading"),
+        { message: errorMessage },
+      ]);
+    } finally {
+      setIsTalking(false);
+      setAiLoading(false);
+    }
   };
 
   useEffect(() => {
