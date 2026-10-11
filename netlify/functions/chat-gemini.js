@@ -1,5 +1,3 @@
-import axios from "axios";
-
 export const handler = async function (event) {
   const body = JSON.parse(event.body);
 
@@ -13,30 +11,30 @@ export const handler = async function (event) {
     }
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`;
-    const response = await axios.post(
-      url,
-      {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
         contents: [
           {
             parts: [{ text: body.messages }],
           },
         ],
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      },
-    );
+      }),
+    });
+
+    const data = await response.json();
 
     return {
-      statusCode: 200,
-      body: JSON.stringify(response.data),
+      statusCode: response.status,
+      body: JSON.stringify(data),
     };
   } catch (error) {
     return {
       statusCode: 500,
-      body: JSON.stringify({ error }),
+      body: JSON.stringify({ error: error.message || error }),
     };
   }
 };
