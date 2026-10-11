@@ -1,9 +1,10 @@
-import { useAnimations, useGLTF } from "@react-three/drei";
+import { useGLTF } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useAtom } from "jotai";
 import { isTalkingAtom } from "pages/Home/store";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import { SkeletonUtils } from "three-stdlib";
+import * as THREE from "three";
 
 const avatarUrl = "/models/man-model.glb";
 
@@ -12,56 +13,80 @@ const Avatar = memo(() => {
   const group = useRef();
   const avatarRef = useRef();
 
-  const [animation, setAnimation] = useState("M_Standing_Idle_001");
-
   const { scene } = useGLTF(avatarUrl);
-  const { animations: idleAnimation } = useGLTF(
-    "/animations/M_Standing_Idle_001.glb"
+  const { animations: idleAnimations } = useGLTF(
+    "/animations/M_Standing_Idle_001.glb",
   );
-  const { animations: talkAnimation } = useGLTF(
-    "/animations/M_Talking_Variations_007.glb"
+  const { animations: talkAnimations } = useGLTF(
+    "/animations/M_Talking_Variations_007.glb",
   );
 
-  // Memoize the cloned model and actions (optional, kalau cuman mau 1 model aja yang di render, ini mestinya gaperlu, pakai scene aja cukup)
   const clone = useMemo(() => SkeletonUtils.clone(scene), [scene]);
-  const { actions } = useAnimations(
-    [idleAnimation[0], talkAnimation[0]],
-    avatarRef
-  );
 
-  // Apply animation transition smoothly
+  // Gunakan AnimationMixer langsung untuk menghindari bug useAnimations (@react-three/drei #2340)
+  // yang sering memanggil mixer.stopAllAction() dan mereset avatar ke T-pose.
+  const mixer = useMemo(() => new THREE.AnimationMixer(clone), [clone]);
+
+  const idleAction = useMemo(() => {
+    if (!idleAnimations?.[0]) return null;
+    const action = mixer.clipAction(idleAnimations[0]);
+    action.setLoop(THREE.LoopRepeat, Infinity);
+    return action;
+  }, [mixer, idleAnimations]);
+
+  const talkAction = useMemo(() => {
+    if (!talkAnimations?.[0]) return null;
+    const action = mixer.clipAction(talkAnimations[0]);
+    action.setLoop(THREE.LoopRepeat, Infinity);
+    return action;
+  }, [mixer, talkAnimations]);
+
+  // Mainkan idle pada awal load
   useEffect(() => {
-    if (actions && actions[animation]) {
-      actions[animation]?.fadeOut(0);
-      actions[animation]?.fadeIn(0).play();
+    if (!idleAction) return;
+    idleAction.setEffectiveWeight(1);
+    idleAction.play();
+  }, [idleAction]);
+
+  // Crossfade mulus tanpa pernah menyentuh T-pose
+  const currentActionRef = useRef(idleAction);
+
+  useEffect(() => {
+    if (!idleAction || !talkAction) return;
+
+    const nextAction = isTalking ? talkAction : idleAction;
+    const prevAction = currentActionRef.current || idleAction;
+
+    if (nextAction !== prevAction) {
+      nextAction.reset();
+      nextAction.setEffectiveWeight(1);
+      nextAction.play();
+      prevAction.crossFadeTo(nextAction, 0.4, false);
+      currentActionRef.current = nextAction;
     }
+  }, [isTalking, idleAction, talkAction]);
 
-    return () => {
-      if (actions && actions[animation]) {
-        actions[animation]?.fadeOut(0.5);
-      }
-    };
-  }, [animation, actions]);
+  // Update frame mixer dan perbaiki posisi hips bone
+  useFrame((_, delta) => {
+    mixer.update(delta);
 
-  // hati2 ya, ini render per frame, bukan kaya useEffect
-  useFrame(() => {
-    // Reset the position of the hips bone for fix bug from model (bug dari readyplayer me)
-    const hips = avatarRef.current?.getObjectByName("Hips");
+    const hips = clone.getObjectByName("Hips");
     if (hips) hips.position.set(0, hips.position.y, 0);
-
-    if (isTalking) {
-      setAnimation("M_Talking_Variations_007");
-    } else {
-      setAnimation("M_Standing_Idle_001");
-    }
   });
+
+  // Cleanup hanya saat component unmount
+  useEffect(() => {
+    return () => {
+      mixer.stopAllAction();
+    };
+  }, [mixer]);
 
   return (
     <group
       ref={group}
       position={[0, -1.2, 0]}
       dispose={null}
-      name={`character-1`}
+      name="character-1"
     >
       <primitive
         object={clone}

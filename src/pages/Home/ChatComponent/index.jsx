@@ -16,10 +16,14 @@ import { isTalkingAtom } from "pages/Home/store";
 
 export default function ChatComponent() {
   const [, setIsTalking] = useAtom(isTalkingAtom);
-  const [init, setInit] = useState(true); // prevent double 1st message at development (due to strictmode)
-
-  const [messages, setMessages] = useState([]); // semua pesan disini
-  const [aiLoading, setAiLoading] = useState(true); // kalo loading, disable button send biar animasi ga kacau. hehe
+  const [messages, setMessages] = useState([
+    {
+      isYou: false,
+      message:
+        "Halo! Saya Rompy, avatar 3D pemandu demo teknologi ini. Ada yang ingin kamu tanyakan seputar teknologi demo avatar 3D ini?",
+    },
+  ]);
+  const [aiLoading, setAiLoading] = useState(false);
   const [message, setMessage] = useState(""); // buat inputan yang kita ketik
 
   const messageSectionRef = useRef(null);
@@ -60,42 +64,9 @@ export default function ChatComponent() {
     }, 100);
 
     try {
-      const promptToSend =
-        userText ||
-        "Halo! Perkenalkan dirimu secara singkat dalam 1-2 kalimat ramah sebagai asisten AI avatar.";
-
-      let res;
-      try {
-        res = await axios.post("/.netlify/functions/chat-gemini", {
-          messages: promptToSend,
-        });
-      } catch (funcErr) {
-        // Fallback untuk local dev jika fungsi Netlify tidak berjalan (404)
-        const localKey =
-          (typeof process !== "undefined" && process.env?.GEMINI_API_KEY) ||
-          import.meta.env?.VITE_GEMINI_API_KEY ||
-          import.meta.env?.GEMINI_API_KEY;
-
-        if (localKey && (funcErr.response?.status === 404 || !funcErr.response)) {
-          res = await axios.post(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${localKey}`,
-            {
-              contents: [
-                {
-                  parts: [{ text: promptToSend }],
-                },
-              ],
-            },
-            {
-              headers: {
-                "Content-Type": "application/json",
-              },
-            }
-          );
-        } else {
-          throw funcErr;
-        }
-      }
+      const res = await axios.post("/.netlify/functions/chat-gemini", {
+        messages: userText,
+      });
 
       const reply =
         res.data?.candidates?.[0]?.content?.parts?.[0]?.text ||
@@ -115,8 +86,8 @@ export default function ChatComponent() {
         }
       }, 100);
 
-      // Hitung durasi avatar bicara berdasarkan panjang respon teks
-      const talkDuration = Math.min(Math.max(reply.length * 60, 2500), 8000);
+      // Hitung durasi avatar bicara (klip animasi talking berdurasi 5.45s, batasi maksimal 5s agar transisi ke idle mulus)
+      const talkDuration = Math.min(Math.max(reply.length * 50, 2000), 5000);
       await new Promise((resolve) => setTimeout(resolve, talkDuration));
     } catch (err) {
       console.error("Gemini API Error:", err);
@@ -133,20 +104,21 @@ export default function ChatComponent() {
     }
   };
 
+  // Animasi avatar menyapa saat pertama kali dibuka (0 token)
   useEffect(() => {
-    if (!init) handleAISendMessage();
-  }, [init]);
+    setIsTalking(true);
+    const timer = setTimeout(() => {
+      setIsTalking(false);
+    }, 3500);
 
-  // prevent double 1st message at development (due to strictmode)
-  useEffect(() => {
-    setInit(false);
-  }, []);
+    return () => clearTimeout(timer);
+  }, [setIsTalking]);
 
   return (
     <ContainerChat>
       <ChatHeader>
-        <div className="title">I WISH</div>
-        <div>Your AI Companion</div>
+        <div className="title">Rompy - 3D AI Guide</div>
+        <div>Interactive Tech Showcase</div>
       </ChatHeader>
 
       <MessageSection ref={messageSectionRef}>
